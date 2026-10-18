@@ -3,7 +3,6 @@ name: APK oluştur
 on:
   push:
     branches: [main]
-    paths: ["android/**", ".github/workflows/android.yml"]
   workflow_dispatch:
 
 permissions:
@@ -14,10 +13,6 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - name: Uygulama sayfasını APK içine kopyala
-        run: |
-          mkdir -p android/app/src/main/assets
-          cp web/index.html android/app/src/main/assets/index.html
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -25,42 +20,246 @@ jobs:
       - uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: "8.10.2"
-      - name: İmza anahtarını hazırla
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+      - name: Android projesini hazırla
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
-            echo "SIGNING_KEYSTORE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
-          elif [ ! -f android/app/release.keystore ]; then
-            echo "İmza anahtarı yok; ilk derleme için oluşturuluyor ve depoya kaydediliyor."
-            keytool -genkeypair -v -keystore android/app/release.keystore -storetype PKCS12 \
-              -alias aegis -keyalg RSA -keysize 2048 -validity 10000 \
-              -storepass aegisos -keypass aegisos -dname "CN=Aegis OS, O=Backpacker, C=TR"
+          set -e
+          A=build-android
+          mkdir -p $A/app/src/main/assets $A/app/src/main/java/com/backpacker/aegisos $A/app/src/main/res/values $A/app/src/main/res/drawable
+          cp index.html $A/app/src/main/assets/index.html
+          cat > $A/settings.gradle <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositories { google(); mavenCentral() } }
+          rootProject.name = "AegisOS"
+          include ':app'
+          EOF
+          cat > $A/build.gradle <<'EOF'
+          plugins { id 'com.android.application' version '8.5.2' apply false }
+          EOF
+          cat > $A/gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2048m
+          android.useAndroidX=false
+          android.nonTransitiveRClass=true
+          EOF
+          cat > $A/app/build.gradle <<'EOF'
+          plugins { id 'com.android.application' }
+          def runNo = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
+          android {
+              namespace 'com.backpacker.aegisos'
+              compileSdk 34
+              defaultConfig {
+                  applicationId 'com.backpacker.aegisos'
+                  minSdk 24
+                  targetSdk 34
+                  versionCode runNo
+                  versionName "1.0." + runNo
+              }
+              signingConfigs {
+                  release {
+                      storeFile file(System.getenv("SIGNING_KEYSTORE"))
+                      storeType 'PKCS12'
+                      storePassword 'aegisos'
+                      keyAlias 'aegis'
+                      keyPassword 'aegisos'
+                  }
+              }
+              buildTypes { release { minifyEnabled false; signingConfig signingConfigs.release } }
+              compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+              lint { abortOnError false; checkReleaseBuilds false }
+          }
+          EOF
+          cat > $A/app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <application
+                  android:label="Aegis OS"
+                  android:icon="@drawable/ic_launcher"
+                  android:roundIcon="@drawable/ic_launcher"
+                  android:allowBackup="true"
+                  android:theme="@style/AppTheme">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTask"
+                      android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+                      android:windowSoftInputMode="adjustResize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+          cat > $A/app/src/main/res/values/styles.xml <<'EOF'
+          <resources>
+              <style name="AppTheme" parent="android:Theme.Material.NoActionBar">
+                  <item name="android:statusBarColor">#090D14</item>
+                  <item name="android:navigationBarColor">#090D14</item>
+                  <item name="android:windowBackground">#090D14</item>
+              </style>
+          </resources>
+          EOF
+          cat > $A/app/src/main/res/drawable/ic_launcher.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp" android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="#090D14" android:pathData="M12,0a12,12 0,1 1,0 24a12,12 0,1 1,0 -24z"/>
+              <path android:strokeColor="#10B981" android:strokeAlpha="0.35" android:strokeWidth="0.6" android:fillColor="#00000000"
+                  android:pathData="M12,2.4a9.6,9.6 0,1 1,0 19.2a9.6,9.6 0,1 1,0 -19.2z"/>
+              <group android:scaleX="0.5" android:scaleY="0.5" android:translateX="6.5" android:translateY="6">
+                  <path android:fillColor="#10B981" android:fillAlpha="0.15" android:strokeColor="#10B981" android:strokeWidth="1.6" android:strokeLineJoin="round"
+                      android:pathData="M11,1.5L2.5,5v6.2c0,5.2 3.6,9.6 8.5,11.3c4.9,-1.7 8.5,-6.1 8.5,-11.3V5L11,1.5Z"/>
+                  <path android:strokeColor="#10B981" android:strokeWidth="1.8" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000"
+                      android:pathData="M7.5,12l2.4,2.4l4.6,-4.8"/>
+              </group>
+          </vector>
+          EOF
+          cat > $A/app/src/main/java/com/backpacker/aegisos/MainActivity.java <<'EOF'
+          package com.backpacker.aegisos;
+          
+          import android.app.Activity;
+          import android.content.Intent;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebResourceResponse;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          
+          import java.io.ByteArrayInputStream;
+          import java.io.ByteArrayOutputStream;
+          import java.io.File;
+          import java.io.FileInputStream;
+          import java.io.FileOutputStream;
+          import java.io.InputStream;
+          import java.net.HttpURLConnection;
+          import java.net.URL;
+          import java.nio.charset.StandardCharsets;
+          import java.util.HashMap;
+          
+          /** Uygulama sayfasını sabit bir adresten (https://aegis.local/) sunar; böylece kayıtlar
+           *  güncellemelerden sonra da aynı yerde kalır. Yeni sürüm GitHub'dan arka planda indirilir. */
+          public class MainActivity extends Activity {
+              static final String HOST = "aegis.local";
+              static final String START = "https://" + HOST + "/index.html";
+              static final String[] REMOTE = {
+                      "https://raw.githubusercontent.com/Backpacker-dotcom/Aegis-OS/main/index.html",
+                      "https://cdn.jsdelivr.net/gh/Backpacker-dotcom/Aegis-OS@main/index.html"
+              };
+              private WebView web;
+          
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  web = new WebView(this);
+                  web.setBackgroundColor(0xFF090D14);
+                  setContentView(web);
+                  WebSettings s = web.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  s.setDatabaseEnabled(true);
+                  s.setTextZoom(100);
+                  web.setWebChromeClient(new WebChromeClient());
+                  web.setWebViewClient(new WebViewClient() {
+                      @Override
+                      public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest req) {
+                          Uri u = req.getUrl();
+                          if (!HOST.equals(u.getHost())) return null;
+                          String path = u.getPath() == null ? "/" : u.getPath();
+                          if (path.equals("/") || path.equals("/index.html")) {
+                              WebResourceResponse r = new WebResourceResponse("text/html", "utf-8", openPage());
+                              HashMap<String, String> h = new HashMap<>();
+                              h.put("Cache-Control", "no-store");
+                              r.setResponseHeaders(h);
+                              return r;
+                          }
+                          return new WebResourceResponse("text/plain", "utf-8", 404, "Not Found",
+                                  new HashMap<String, String>(), new ByteArrayInputStream(new byte[0]));
+                      }
+          
+                      @Override
+                      public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
+                          Uri u = req.getUrl();
+                          if (HOST.equals(u.getHost())) return false;
+                          try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (Exception ignored) { }
+                          return true;
+                      }
+                  });
+                  web.loadUrl(START);
+                  new Thread(this::fetchUpdate).start();
+              }
+          
+              private InputStream openPage() {
+                  try {
+                      File f = new File(getFilesDir(), "index.html");
+                      if (f.exists() && f.length() > 50000) return new FileInputStream(f);
+                      return getAssets().open("index.html");
+                  } catch (Exception e) {
+                      return new ByteArrayInputStream("<p style=\"color:#fff;font-family:sans-serif;padding:24px\">Sayfa açılamadı.</p>".getBytes(StandardCharsets.UTF_8));
+                  }
+              }
+          
+              /** GitHub'daki son sürümü indirir; bir sonraki açılışta kullanılır. */
+              private void fetchUpdate() {
+                  for (String src : REMOTE) {
+                      try {
+                          HttpURLConnection c = (HttpURLConnection) new URL(src + "?t=" + System.currentTimeMillis()).openConnection();
+                          c.setConnectTimeout(10000);
+                          c.setReadTimeout(20000);
+                          c.setUseCaches(false);
+                          if (c.getResponseCode() != 200) { c.disconnect(); continue; }
+                          InputStream in = c.getInputStream();
+                          ByteArrayOutputStream out = new ByteArrayOutputStream();
+                          byte[] buf = new byte[16384];
+                          int n;
+                          while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                          in.close();
+                          c.disconnect();
+                          byte[] data = out.toByteArray();
+                          String txt = new String(data, StandardCharsets.UTF_8);
+                          if (data.length < 50000 || !txt.contains("<html") || !txt.contains("</script>")) continue;
+                          File tmp = new File(getFilesDir(), "index.tmp");
+                          FileOutputStream fo = new FileOutputStream(tmp);
+                          fo.write(data);
+                          fo.close();
+                          File dst = new File(getFilesDir(), "index.html");
+                          if (!tmp.renameTo(dst)) { dst.delete(); tmp.renameTo(dst); }
+                          return;
+                      } catch (Exception ignored) { }
+                  }
+              }
+          
+              /** Geri tuşu: önce sayfadaki açık pencere/sekme kapanır (window.aegisBack), yoksa uygulama arka plana alınır. */
+              @Override
+              public void onBackPressed() {
+                  if (web == null) { super.onBackPressed(); return; }
+                  web.evaluateJavascript("!!(window.aegisBack&&window.aegisBack())", v -> {
+                      if (!"true".equals(v)) moveTaskToBack(true);
+                  });
+              }
+          }
+          EOF
+      - name: İmza anahtarı
+        run: |
+          if [ ! -f release.keystore ]; then
+            keytool -genkeypair -keystore release.keystore -storetype PKCS12 -alias aegis -keyalg RSA -keysize 2048 -validity 10000 -storepass aegisos -keypass aegisos -dname "CN=Aegis OS, O=Backpacker, C=TR"
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add android/app/release.keystore
-            git commit -m "İmza anahtarı (ilk derlemede otomatik oluşturuldu)"
-            git push origin HEAD:main || echo "Anahtar depoya yazılamadı; sonraki derlemeler yeni anahtar üretir."
-          else
-            echo "Depodaki release.keystore kullanılacak."
+            git add release.keystore
+            git commit -m "İmza anahtarı [skip ci]"
+            git push origin HEAD:main || true
           fi
+          echo "SIGNING_KEYSTORE=$GITHUB_WORKSPACE/release.keystore" >> "$GITHUB_ENV"
       - name: APK derle
-        working-directory: android
-        env:
-          SIGNING_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        working-directory: build-android
         run: gradle --no-daemon assembleRelease
-      - name: APK'yı adlandır
-        run: cp android/app/build/outputs/apk/release/app-release.apk AegisOS.apk
-      - name: Sürüm olarak yayınla
-        uses: softprops/action-gh-release@v2
+      - run: cp build-android/app/build/outputs/apk/release/app-release.apk AegisOS.apk
+      - uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: Aegis OS 1.0.${{ github.run_number }}
           make_latest: true
           files: AegisOS.apk
-          body: |
-            Telefona kurmak için AegisOS.apk dosyasını indir.
-            Uygulama ekranları web/index.html üzerinden otomatik güncellenir; yeniden kurman gerekmez.
+          body: Telefona kurmak için AegisOS.apk dosyasını indir.
