@@ -1,0 +1,66 @@
+name: APK oluştur
+
+on:
+  push:
+    branches: [main]
+    paths: ["android/**", ".github/workflows/android.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Uygulama sayfasını APK içine kopyala
+        run: |
+          mkdir -p android/app/src/main/assets
+          cp web/index.html android/app/src/main/assets/index.html
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: "8.10.2"
+      - name: İmza anahtarını hazırla
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "SIGNING_KEYSTORE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+          elif [ ! -f android/app/release.keystore ]; then
+            echo "İmza anahtarı yok; ilk derleme için oluşturuluyor ve depoya kaydediliyor."
+            keytool -genkeypair -v -keystore android/app/release.keystore -storetype PKCS12 \
+              -alias aegis -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass aegisos -keypass aegisos -dname "CN=Aegis OS, O=Backpacker, C=TR"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add android/app/release.keystore
+            git commit -m "İmza anahtarı (ilk derlemede otomatik oluşturuldu)"
+            git push origin HEAD:main || echo "Anahtar depoya yazılamadı; sonraki derlemeler yeni anahtar üretir."
+          else
+            echo "Depodaki release.keystore kullanılacak."
+          fi
+      - name: APK derle
+        working-directory: android
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: gradle --no-daemon assembleRelease
+      - name: APK'yı adlandır
+        run: cp android/app/build/outputs/apk/release/app-release.apk AegisOS.apk
+      - name: Sürüm olarak yayınla
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Aegis OS 1.0.${{ github.run_number }}
+          make_latest: true
+          files: AegisOS.apk
+          body: |
+            Telefona kurmak için AegisOS.apk dosyasını indir.
+            Uygulama ekranları web/index.html üzerinden otomatik güncellenir; yeniden kurman gerekmez.
