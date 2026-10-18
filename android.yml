@@ -1,0 +1,653 @@
+name: APK oluştur
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: "8.10.2"
+      - name: Android projesini hazırla
+        run: |
+          set -e
+          A=build-android
+          mkdir -p $A/app/src/main/assets $A/app/src/main/java/com/backpacker/aegisos $A/app/src/main/res/values $A/app/src/main/res/drawable
+          cp index.html $A/app/src/main/assets/index.html
+          cat > $A/settings.gradle <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositories { google(); mavenCentral() } }
+          rootProject.name = "AegisOS"
+          include ':app'
+          EOF
+          cat > $A/build.gradle <<'EOF'
+          plugins { id 'com.android.application' version '8.5.2' apply false }
+          EOF
+          cat > $A/gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2048m
+          android.useAndroidX=false
+          android.nonTransitiveRClass=true
+          EOF
+          cat > $A/app/build.gradle <<'EOF'
+          plugins { id 'com.android.application' }
+          def runNo = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
+          android {
+              namespace 'com.backpacker.aegisos'
+              compileSdk 34
+              defaultConfig {
+                  applicationId 'com.backpacker.aegisos'
+                  minSdk 24
+                  targetSdk 34
+                  versionCode runNo
+                  versionName "1.0." + runNo
+              }
+              signingConfigs {
+                  release {
+                      storeFile file(System.getenv("SIGNING_KEYSTORE"))
+                      storeType 'PKCS12'
+                      storePassword 'aegisos'
+                      keyAlias 'aegis'
+                      keyPassword 'aegisos'
+                  }
+              }
+              buildTypes { release { minifyEnabled false; signingConfig signingConfigs.release } }
+              compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+              lint { abortOnError false; checkReleaseBuilds false }
+          }
+          EOF
+          cat > $A/app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+              <application
+                  android:label="Aegis OS"
+                  android:icon="@drawable/ic_launcher"
+                  android:roundIcon="@drawable/ic_launcher"
+                  android:allowBackup="true"
+                  android:theme="@style/AppTheme">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTask"
+                      android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+                      android:windowSoftInputMode="adjustResize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+                  <provider
+                      android:name=".Files"
+                      android:authorities="com.backpacker.aegisos.files"
+                      android:exported="false"
+                      android:grantUriPermissions="true" />
+                  <receiver android:name=".ReminderReceiver" android:exported="false">
+                      <intent-filter>
+                          <action android:name="android.intent.action.BOOT_COMPLETED" />
+                          <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                      </intent-filter>
+                  </receiver>
+              </application>
+          </manifest>
+          EOF
+          cat > $A/app/src/main/res/values/styles.xml <<'EOF'
+          <resources>
+              <style name="AppTheme" parent="android:Theme.Material.NoActionBar">
+                  <item name="android:statusBarColor">#090D14</item>
+                  <item name="android:navigationBarColor">#090D14</item>
+                  <item name="android:windowBackground">#090D14</item>
+              </style>
+          </resources>
+          EOF
+          cat > $A/app/src/main/res/drawable/ic_launcher.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp" android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="#090D14" android:pathData="M12,0a12,12 0,1 1,0 24a12,12 0,1 1,0 -24z"/>
+              <path android:strokeColor="#10B981" android:strokeAlpha="0.35" android:strokeWidth="0.6" android:fillColor="#00000000"
+                  android:pathData="M12,2.4a9.6,9.6 0,1 1,0 19.2a9.6,9.6 0,1 1,0 -19.2z"/>
+              <group android:scaleX="0.5" android:scaleY="0.5" android:translateX="6.5" android:translateY="6">
+                  <path android:fillColor="#10B981" android:fillAlpha="0.15" android:strokeColor="#10B981" android:strokeWidth="1.6" android:strokeLineJoin="round"
+                      android:pathData="M11,1.5L2.5,5v6.2c0,5.2 3.6,9.6 8.5,11.3c4.9,-1.7 8.5,-6.1 8.5,-11.3V5L11,1.5Z"/>
+                  <path android:strokeColor="#10B981" android:strokeWidth="1.8" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000"
+                      android:pathData="M7.5,12l2.4,2.4l4.6,-4.8"/>
+              </group>
+          </vector>
+          EOF
+          cat > $A/app/src/main/res/drawable/ic_notify.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp" android:viewportWidth="22" android:viewportHeight="24">
+              <path android:fillColor="#FFFFFFFF" android:pathData="M11,1.5L2.5,5v6.2c0,5.2 3.6,9.6 8.5,11.3c4.9,-1.7 8.5,-6.1 8.5,-11.3V5L11,1.5ZM9.9,16.1l-3.6,-3.6l1.4,-1.4l2.2,2.2l4.4,-4.6l1.4,1.4Z"/>
+          </vector>
+          EOF
+          cat > $A/app/src/main/java/com/backpacker/aegisos/MainActivity.java <<'EOF'
+          package com.backpacker.aegisos;
+          
+          import android.app.Activity;
+          import android.content.ClipData;
+          import android.content.Intent;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.provider.MediaStore;
+          import android.text.TextUtils;
+          import android.webkit.ValueCallback;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebResourceResponse;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          
+          import java.io.ByteArrayInputStream;
+          import java.io.ByteArrayOutputStream;
+          import java.io.File;
+          import java.io.FileInputStream;
+          import java.io.FileOutputStream;
+          import java.io.InputStream;
+          import java.io.OutputStream;
+          import java.net.HttpURLConnection;
+          import java.net.URL;
+          import java.nio.charset.StandardCharsets;
+          import java.util.HashMap;
+          
+          public class MainActivity extends Activity {
+              static final String HOST = "aegis.local";
+              static final String START = "https://" + HOST + "/index.html";
+              static final String[] REMOTE = {
+                      "https://raw.githubusercontent.com/Backpacker-dotcom/Aegis-OS/main/index.html",
+                      "https://cdn.jsdelivr.net/gh/Backpacker-dotcom/Aegis-OS@main/index.html"
+              };
+              static final int REQ_FILE = 41, REQ_CAM = 42, REQ_EXPORT = 43;
+              WebView web;
+              byte[] pendingExport;
+              private ValueCallback<Uri[]> fileCb;
+              private Uri camUri;
+              private File camFile;
+          
+              void js(final String code) {
+                  runOnUiThread(() -> { if (web != null) web.evaluateJavascript(code, null); });
+              }
+          
+              void toast(String msg) {
+                  js("window.onNativeToast&&window.onNativeToast(" + org.json.JSONObject.quote(msg) + ")");
+              }
+          
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  web = new WebView(this);
+                  web.setBackgroundColor(0xFF090D14);
+                  setContentView(web);
+                  WebSettings s = web.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  s.setDatabaseEnabled(true);
+                  s.setAllowFileAccess(false);
+                  s.setTextZoom(100);
+                  web.addJavascriptInterface(new Bridge(this), "Android");
+                  web.setWebChromeClient(new WebChromeClient() {
+                      @Override
+                      public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams p) {
+                          if (fileCb != null) fileCb.onReceiveValue(null);
+                          fileCb = cb;
+                          try {
+                              if (p.isCaptureEnabled()) {
+                                  File dir = new File(getCacheDir(), "cam");
+                                  dir.mkdirs();
+                                  camFile = new File(dir, "Fotograf-" + System.currentTimeMillis() + ".jpg");
+                                  camUri = Files.uriFor(MainActivity.this, camFile);
+                                  Intent cam = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+                                  cam.putExtra(MediaStore.EXTRA_OUTPUT, camUri);
+                                  cam.setClipData(ClipData.newRawUri("", camUri));
+                                  cam.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                  startActivityForResult(cam, REQ_CAM);
+                              } else {
+                                  String acc = TextUtils.join(",", p.getAcceptTypes()).toLowerCase();
+                                  Intent i = new Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*");
+                                  if (acc.contains("image") && acc.contains("pdf")) i.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "application/pdf"});
+                                  else if (acc.contains("image") && !acc.contains("json")) i.setType("image/*");
+                                  startActivityForResult(Intent.createChooser(i, "Dosya seç"), REQ_FILE);
+                              }
+                          } catch (Exception e) {
+                              fileCb = null;
+                              toast("Dosya seçici açılamadı");
+                              return false;
+                          }
+                          return true;
+                      }
+                  });
+                  web.setWebViewClient(new WebViewClient() {
+                      @Override
+                      public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest req) {
+                          Uri u = req.getUrl();
+                          if (!HOST.equals(u.getHost())) return null;
+                          String path = u.getPath() == null ? "/" : u.getPath();
+                          if (path.equals("/") || path.equals("/index.html")) {
+                              WebResourceResponse r = new WebResourceResponse("text/html", "utf-8", openPage());
+                              HashMap<String, String> h = new HashMap<>();
+                              h.put("Cache-Control", "no-store");
+                              r.setResponseHeaders(h);
+                              return r;
+                          }
+                          return new WebResourceResponse("text/plain", "utf-8", 404, "Not Found",
+                                  new HashMap<String, String>(), new ByteArrayInputStream(new byte[0]));
+                      }
+          
+                      @Override
+                      public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
+                          Uri u = req.getUrl();
+                          if (HOST.equals(u.getHost())) return false;
+                          try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (Exception ignored) { }
+                          return true;
+                      }
+                  });
+                  web.loadUrl(START);
+                  Reminder.schedule(this);
+                  new Thread(this::fetchUpdate).start();
+              }
+          
+              @Override
+              protected void onActivityResult(int req, int res, Intent data) {
+                  super.onActivityResult(req, res, data);
+                  if (req == REQ_FILE || req == REQ_CAM) {
+                      if (fileCb == null) return;
+                      Uri[] r = null;
+                      if (res == RESULT_OK) {
+                          if (req == REQ_CAM) { if (camFile != null && camFile.length() > 0) r = new Uri[]{camUri}; }
+                          else if (data != null && data.getData() != null) r = new Uri[]{data.getData()};
+                      }
+                      fileCb.onReceiveValue(r);
+                      fileCb = null;
+                  } else if (req == REQ_EXPORT) {
+                      boolean ok = false;
+                      if (res == RESULT_OK && data != null && data.getData() != null && pendingExport != null) {
+                          try (OutputStream o = getContentResolver().openOutputStream(data.getData())) { o.write(pendingExport); ok = true; } catch (Exception ignored) { }
+                      }
+                      pendingExport = null;
+                      js("window.onNativeExport&&window.onNativeExport(" + ok + ")");
+                  }
+              }
+          
+              @Override
+              public void onRequestPermissionsResult(int req, String[] perms, int[] res) {
+                  super.onRequestPermissionsResult(req, perms, res);
+                  js("window.onNativeNotif&&window.onNativeNotif()");
+              }
+          
+              private InputStream openPage() {
+                  try {
+                      File f = new File(getFilesDir(), "index.html");
+                      if (f.exists() && f.length() > 50000) return new FileInputStream(f);
+                      return getAssets().open("index.html");
+                  } catch (Exception e) {
+                      return new ByteArrayInputStream("<p style=\"color:#fff;font-family:sans-serif;padding:24px\">Sayfa açılamadı.</p>".getBytes(StandardCharsets.UTF_8));
+                  }
+              }
+          
+              private void fetchUpdate() {
+                  for (String src : REMOTE) {
+                      try {
+                          HttpURLConnection c = (HttpURLConnection) new URL(src + "?t=" + System.currentTimeMillis()).openConnection();
+                          c.setConnectTimeout(10000);
+                          c.setReadTimeout(20000);
+                          c.setUseCaches(false);
+                          if (c.getResponseCode() != 200) { c.disconnect(); continue; }
+                          InputStream in = c.getInputStream();
+                          ByteArrayOutputStream out = new ByteArrayOutputStream();
+                          byte[] buf = new byte[16384];
+                          int n;
+                          while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                          in.close();
+                          c.disconnect();
+                          byte[] data = out.toByteArray();
+                          String txt = new String(data, StandardCharsets.UTF_8);
+                          if (data.length < 50000 || !txt.contains("<html") || !txt.contains("</script>")) continue;
+                          File tmp = new File(getFilesDir(), "index.tmp");
+                          FileOutputStream fo = new FileOutputStream(tmp);
+                          fo.write(data);
+                          fo.close();
+                          File dst = new File(getFilesDir(), "index.html");
+                          if (!tmp.renameTo(dst)) { dst.delete(); tmp.renameTo(dst); }
+                          return;
+                      } catch (Exception ignored) { }
+                  }
+              }
+          
+              @Override
+              public void onBackPressed() {
+                  if (web == null) { super.onBackPressed(); return; }
+                  web.evaluateJavascript("!!(window.aegisBack&&window.aegisBack())", v -> {
+                      if (!"true".equals(v)) moveTaskToBack(true);
+                  });
+              }
+          }
+          EOF
+          cat > $A/app/src/main/java/com/backpacker/aegisos/Bridge.java <<'EOF'
+          package com.backpacker.aegisos;
+          
+          import android.Manifest;
+          import android.app.NotificationManager;
+          import android.content.ClipData;
+          import android.content.ClipboardManager;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.pm.PackageManager;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.util.Base64;
+          import android.webkit.JavascriptInterface;
+          
+          import org.json.JSONArray;
+          import org.json.JSONObject;
+          
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.nio.charset.StandardCharsets;
+          import java.util.ArrayList;
+          
+          public class Bridge {
+              private final MainActivity a;
+          
+              Bridge(MainActivity a) { this.a = a; }
+          
+              @JavascriptInterface
+              public void copy(final String text) {
+                  a.runOnUiThread(() -> {
+                      ClipboardManager cm = (ClipboardManager) a.getSystemService(Context.CLIPBOARD_SERVICE);
+                      if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("Aegis OS", text));
+                  });
+              }
+          
+              @JavascriptInterface
+              public void setReminders(String json) {
+                  Reminder.prefs(a).edit().putString("items", json == null ? "[]" : json).apply();
+                  Reminder.schedule(a);
+              }
+          
+              @JavascriptInterface
+              public boolean notificationsAllowed() {
+                  if (Build.VERSION.SDK_INT >= 33 && a.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return false;
+                  NotificationManager nm = (NotificationManager) a.getSystemService(Context.NOTIFICATION_SERVICE);
+                  return nm == null || nm.areNotificationsEnabled();
+              }
+          
+              @JavascriptInterface
+              public void requestNotifications() {
+                  if (Build.VERSION.SDK_INT >= 33) a.runOnUiThread(() -> a.requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 7));
+              }
+          
+              @JavascriptInterface
+              public void exportText(final String name, final String mime, final String text) {
+                  a.runOnUiThread(() -> {
+                      a.pendingExport = text.getBytes(StandardCharsets.UTF_8);
+                      Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(mime).putExtra(Intent.EXTRA_TITLE, name);
+                      try { a.startActivityForResult(i, MainActivity.REQ_EXPORT); }
+                      catch (Exception e) { a.pendingExport = null; a.js("window.onNativeExport&&window.onNativeExport(false)"); }
+                  });
+              }
+          
+              private Uri write(String sub, String name, String b64) throws Exception {
+                  File dir = new File(a.getCacheDir(), sub);
+                  dir.mkdirs();
+                  File f = new File(dir, name.replaceAll("[\\\\/:*?\"<>|]", "_"));
+                  try (FileOutputStream o = new FileOutputStream(f)) { o.write(Base64.decode(b64, Base64.DEFAULT)); }
+                  return Files.uriFor(a, f);
+              }
+          
+              @JavascriptInterface
+              public void openFile(final String name, final String mime, final String b64) {
+                  try {
+                      final Uri u = write("open", name, b64);
+                      a.runOnUiThread(() -> {
+                          Intent i = new Intent(Intent.ACTION_VIEW).setDataAndType(u, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                          try { a.startActivity(Intent.createChooser(i, "Aç")); } catch (Exception e) { a.toast("Bu dosyayı açacak uygulama yok"); }
+                      });
+                  } catch (Exception e) { a.toast("Dosya açılamadı"); }
+              }
+          
+              @JavascriptInterface
+              public void shareFiles(final String json, final String text) {
+                  try {
+                      JSONArray arr = new JSONArray(json);
+                      final ArrayList<Uri> uris = new ArrayList<>();
+                      for (int k = 0; k < arr.length(); k++) {
+                          JSONObject o = arr.getJSONObject(k);
+                          uris.add(write("share", o.getString("name"), o.getString("b64")));
+                      }
+                      if (uris.isEmpty()) return;
+                      a.runOnUiThread(() -> {
+                          Intent i;
+                          if (uris.size() == 1) { i = new Intent(Intent.ACTION_SEND); i.putExtra(Intent.EXTRA_STREAM, uris.get(0)); }
+                          else { i = new Intent(Intent.ACTION_SEND_MULTIPLE); i.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris); }
+                          i.setType("*/*");
+                          i.putExtra(Intent.EXTRA_TEXT, text);
+                          ClipData cd = ClipData.newRawUri("", uris.get(0));
+                          for (int k = 1; k < uris.size(); k++) cd.addItem(new ClipData.Item(uris.get(k)));
+                          i.setClipData(cd);
+                          i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                          Intent wa = new Intent(i).setPackage("com.whatsapp");
+                          try { a.startActivity(wa); }
+                          catch (Exception e) {
+                              try { a.startActivity(Intent.createChooser(i, "Evrakları gönder")); } catch (Exception ignored) { a.toast("Paylaşılamadı"); }
+                          }
+                      });
+                  } catch (Exception e) { a.toast("Paylaşılamadı"); }
+              }
+          }
+          EOF
+          cat > $A/app/src/main/java/com/backpacker/aegisos/Files.java <<'EOF'
+          package com.backpacker.aegisos;
+          
+          import android.content.ContentProvider;
+          import android.content.ContentValues;
+          import android.content.Context;
+          import android.database.Cursor;
+          import android.database.MatrixCursor;
+          import android.net.Uri;
+          import android.os.ParcelFileDescriptor;
+          import android.provider.OpenableColumns;
+          
+          import java.io.File;
+          import java.io.FileNotFoundException;
+          
+          public class Files extends ContentProvider {
+              static final String AUTH = "com.backpacker.aegisos.files";
+          
+              static Uri uriFor(Context c, File f) {
+                  String base = c.getCacheDir().getAbsolutePath();
+                  String rel = f.getAbsolutePath().substring(base.length() + 1);
+                  Uri.Builder b = new Uri.Builder().scheme("content").authority(AUTH);
+                  for (String s : rel.split("/")) b.appendPath(s);
+                  return b.build();
+              }
+          
+              private File fileFor(Uri u) throws FileNotFoundException {
+                  File f = getContext().getCacheDir();
+                  for (String s : u.getPathSegments()) {
+                      if (s.equals("..") || s.equals(".")) throw new FileNotFoundException();
+                      f = new File(f, s);
+                  }
+                  return f;
+              }
+          
+              @Override public boolean onCreate() { return true; }
+          
+              @Override
+              public Cursor query(Uri uri, String[] projection, String selection, String[] args, String sort) {
+                  File f;
+                  try { f = fileFor(uri); } catch (Exception e) { return null; }
+                  MatrixCursor c = new MatrixCursor(new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE});
+                  c.addRow(new Object[]{f.getName(), f.length()});
+                  return c;
+              }
+          
+              @Override
+              public String getType(Uri uri) {
+                  String n = uri.getLastPathSegment();
+                  if (n == null) return "application/octet-stream";
+                  n = n.toLowerCase();
+                  if (n.endsWith(".pdf")) return "application/pdf";
+                  if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
+                  if (n.endsWith(".png")) return "image/png";
+                  if (n.endsWith(".json")) return "application/json";
+                  return "application/octet-stream";
+              }
+          
+              @Override
+              public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
+                  File f = fileFor(uri);
+                  File p = f.getParentFile();
+                  if (p != null) p.mkdirs();
+                  return ParcelFileDescriptor.open(f, ParcelFileDescriptor.parseMode(mode));
+              }
+          
+              @Override public Uri insert(Uri uri, ContentValues v) { return null; }
+              @Override public int delete(Uri uri, String s, String[] a) { return 0; }
+              @Override public int update(Uri uri, ContentValues v, String s, String[] a) { return 0; }
+          }
+          EOF
+          cat > $A/app/src/main/java/com/backpacker/aegisos/Reminder.java <<'EOF'
+          package com.backpacker.aegisos;
+          
+          import android.app.AlarmManager;
+          import android.app.Notification;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.app.PendingIntent;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.os.Build;
+          
+          import org.json.JSONArray;
+          import org.json.JSONObject;
+          
+          import java.util.Calendar;
+          
+          public class Reminder {
+              static final String CH = "deadlines";
+              static final String ACTION = "com.backpacker.aegisos.CHECK";
+          
+              static SharedPreferences prefs(Context c) { return c.getSharedPreferences("aegis", Context.MODE_PRIVATE); }
+          
+              static String todayKey() {
+                  Calendar n = Calendar.getInstance();
+                  return n.get(Calendar.YEAR) + "-" + n.get(Calendar.DAY_OF_YEAR);
+              }
+          
+              static PendingIntent pi(Context c) {
+                  Intent i = new Intent(c, ReminderReceiver.class).setAction(ACTION);
+                  return PendingIntent.getBroadcast(c, 1, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+              }
+          
+              static void schedule(Context c) {
+                  AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
+                  if (am == null) return;
+                  long now = System.currentTimeMillis();
+                  Calendar t = Calendar.getInstance();
+                  t.set(Calendar.HOUR_OF_DAY, 9);
+                  t.set(Calendar.MINUTE, 30);
+                  t.set(Calendar.SECOND, 0);
+                  t.set(Calendar.MILLISECOND, 0);
+                  long at;
+                  if (t.getTimeInMillis() <= now) {
+                      if (!todayKey().equals(prefs(c).getString("last", ""))) at = now + 60000;
+                      else { t.add(Calendar.DAY_OF_MONTH, 1); at = t.getTimeInMillis(); }
+                  } else at = t.getTimeInMillis();
+                  am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi(c));
+              }
+          
+              static int daysUntil(String iso) {
+                  String[] p = iso.split("-");
+                  Calendar d = Calendar.getInstance();
+                  d.clear();
+                  d.set(Integer.parseInt(p[0]), Integer.parseInt(p[1]) - 1, Integer.parseInt(p[2]));
+                  Calendar n = Calendar.getInstance();
+                  Calendar t = Calendar.getInstance();
+                  t.clear();
+                  t.set(n.get(Calendar.YEAR), n.get(Calendar.MONTH), n.get(Calendar.DAY_OF_MONTH));
+                  return (int) Math.round((d.getTimeInMillis() - t.getTimeInMillis()) / 86400000.0);
+              }
+          
+              static void check(Context c) {
+                  SharedPreferences p = prefs(c);
+                  String today = todayKey();
+                  if (today.equals(p.getString("last", ""))) return;
+                  p.edit().putString("last", today).apply();
+                  NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+                  if (nm == null) return;
+                  if (Build.VERSION.SDK_INT >= 26) nm.createNotificationChannel(new NotificationChannel(CH, "Süre hatırlatmaları", NotificationManager.IMPORTANCE_DEFAULT));
+                  try {
+                      JSONArray arr = new JSONArray(p.getString("items", "[]"));
+                      Intent open = new Intent(c, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                      PendingIntent cpi = PendingIntent.getActivity(c, 2, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+                      for (int k = 0; k < arr.length(); k++) {
+                          JSONObject o = arr.getJSONObject(k);
+                          int d = daysUntil(o.getString("date"));
+                          if (d != 14 && d != 7 && d != 3 && d != 1 && d != 0) continue;
+                          String when = d == 0 ? "Bugün son gün" : d + " gün kaldı";
+                          String body = o.optString("body");
+                          Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(c, CH) : new Notification.Builder(c);
+                          b.setSmallIcon(R.drawable.ic_notify)
+                                  .setContentTitle(o.optString("title") + " · " + when)
+                                  .setContentText(body)
+                                  .setStyle(new Notification.BigTextStyle().bigText(body))
+                                  .setColor(0xFF10B981)
+                                  .setAutoCancel(true)
+                                  .setContentIntent(cpi);
+                          nm.notify(o.optString("id").hashCode(), b.build());
+                      }
+                  } catch (Exception ignored) { }
+              }
+          }
+          EOF
+          cat > $A/app/src/main/java/com/backpacker/aegisos/ReminderReceiver.java <<'EOF'
+          package com.backpacker.aegisos;
+          
+          import android.content.BroadcastReceiver;
+          import android.content.Context;
+          import android.content.Intent;
+          
+          public class ReminderReceiver extends BroadcastReceiver {
+              @Override
+              public void onReceive(Context c, Intent i) {
+                  if (Reminder.ACTION.equals(i.getAction())) Reminder.check(c);
+                  Reminder.schedule(c);
+              }
+          }
+          EOF
+      - name: İmza anahtarı
+        run: |
+          if [ ! -f release.keystore ]; then
+            keytool -genkeypair -keystore release.keystore -storetype PKCS12 -alias aegis -keyalg RSA -keysize 2048 -validity 10000 -storepass aegisos -keypass aegisos -dname "CN=Aegis OS, O=Backpacker, C=TR"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add release.keystore
+            git commit -m "İmza anahtarı [skip ci]"
+            git push origin HEAD:main || true
+          fi
+          echo "SIGNING_KEYSTORE=$GITHUB_WORKSPACE/release.keystore" >> "$GITHUB_ENV"
+      - name: APK derle
+        working-directory: build-android
+        run: gradle --no-daemon assembleRelease
+      - run: cp build-android/app/build/outputs/apk/release/app-release.apk AegisOS.apk
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Aegis OS 1.0.${{ github.run_number }}
+          make_latest: true
+          files: AegisOS.apk
+          body: Telefona kurmak için AegisOS.apk dosyasını indir.
